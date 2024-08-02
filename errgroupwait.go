@@ -18,15 +18,6 @@ const (
 	MessageTypeAdd MessageType = iota + 1
 )
 
-// RunningMode describes the mode the linter is run in. This can be either
-// native or golangci-lint.
-type RunningMode uint8
-
-const (
-	RunningModeNative RunningMode = iota
-	RunningModeGolangCI
-)
-
 // Message contains a message and diagnostic information.
 type Message struct {
 	Diagnostic  token.Pos
@@ -39,14 +30,19 @@ type Message struct {
 
 // Settings contains settings for edge-cases.
 type Settings struct {
-	Mode        RunningMode
 	RequireWait bool
+}
+
+func DefaultSettings() *Settings {
+	return &Settings{
+		RequireWait: true,
+	}
 }
 
 // NewAnalyzer creates a new errgroupcheck analyzer.
 func NewAnalyzer(settings *Settings) *analysis.Analyzer {
 	if settings == nil {
-		settings = &Settings{RequireWait: true}
+		settings = DefaultSettings()
 	}
 
 	return &analysis.Analyzer{
@@ -80,30 +76,7 @@ func Run(pass *analysis.Pass, settings *Settings) []Message {
 		}
 
 		fileMessages := runFile(file, pass.Fset)
-
-		if settings.Mode == RunningModeGolangCI {
-			messages = append(messages, fileMessages...)
-			continue
-		}
-
-		for _, message := range fileMessages {
-			pass.Report(analysis.Diagnostic{
-				Pos:      message.Diagnostic,
-				Category: "errgroupcheck",
-				Message:  message.Message,
-				SuggestedFixes: []analysis.SuggestedFix{
-					{
-						TextEdits: []analysis.TextEdit{
-							{
-								Pos:     message.FixStart,
-								End:     message.FixEnd,
-								NewText: []byte("errgroup.Wait()"),
-							},
-						},
-					},
-				},
-			})
-		}
+		messages = append(messages, fileMessages...)
 	}
 
 	return messages

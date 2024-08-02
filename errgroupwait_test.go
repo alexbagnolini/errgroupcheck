@@ -9,7 +9,6 @@ import (
 func TestRequireWait(t *testing.T) {
 	testdata := analysistest.TestData()
 	analyzer := NewAnalyzer(&Settings{
-		Mode:        RunningModeNative,
 		RequireWait: true,
 	})
 
