@@ -1,4 +1,4 @@
-module wait
+module errgroupcheck_testdata
 
 go 1.21
 

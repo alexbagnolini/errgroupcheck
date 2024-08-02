@@ -1,4 +1,4 @@
-package require_wait
+package errgroupcheck_testdata
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func errgroupWithWait() {
+func ErrgroupWithWait() {
 	eg := errgroup.Group{}
 
 	eg.Go(func() error {
@@ -20,7 +20,7 @@ func errgroupWithWait() {
 	_ = eg.Wait()
 }
 
-func errgroupMissingWait() {
+func ErrgroupMissingWait() {
 	eg := errgroup.Group{} // want "errgroup 'eg' does not have Wait called"
 
 	eg.Go(func() error {
@@ -32,7 +32,7 @@ func errgroupMissingWait() {
 	})
 }
 
-func errgroupContextWithWait() {
+func ErrgroupContextWithWait() {
 	eg, _ := errgroup.WithContext(context.Background())
 
 	eg.Go(func() error {
@@ -46,7 +46,7 @@ func errgroupContextWithWait() {
 	_ = eg.Wait()
 }
 
-func errgroupContextMissingWait() {
+func ErrgroupContextMissingWait() {
 	eg, _ := errgroup.WithContext(context.Background()) // want "errgroup 'eg' does not have Wait called"
 
 	eg.Go(func() error {
@@ -58,7 +58,7 @@ func errgroupContextMissingWait() {
 	})
 }
 
-func errgroupMultipleScopesWithWait() {
+func ErrgroupMultipleScopesWithWait() {
 	eg := errgroup.Group{}
 
 	eg.Go(func() error {
@@ -78,7 +78,7 @@ func errgroupMultipleScopesWithWait() {
 	_ = eg.Wait()
 }
 
-func errgroupMultipleScopesMissingWait() {
+func ErrgroupMultipleScopesMissingWait() {
 	eg := errgroup.Group{}
 
 	eg.Go(func() error {

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
-	"reflect"
 
 	"golang.org/x/tools/go/analysis"
 )
@@ -50,9 +49,8 @@ func NewAnalyzer(settings *Settings) *analysis.Analyzer {
 		Doc:   "Checks that each errgroup has Wait called at least once",
 		Flags: flags(settings),
 		Run: func(p *analysis.Pass) (any, error) {
-			return Run(p, settings), nil
+			return Run(p, settings)
 		},
-		ResultType: reflect.TypeOf([]Message{}),
 	}
 }
 
@@ -62,12 +60,10 @@ func flags(settings *Settings) flag.FlagSet {
 	return *flags
 }
 
-func Run(pass *analysis.Pass, settings *Settings) []Message {
+func Run(pass *analysis.Pass, settings *Settings) (interface{}, error) {
 	if !settings.RequireWait {
-		return nil
+		return nil, nil
 	}
-
-	messages := []Message{}
 
 	for _, file := range pass.Files {
 		filename := pass.Fset.Position(file.Pos()).Filename
@@ -75,11 +71,10 @@ func Run(pass *analysis.Pass, settings *Settings) []Message {
 			continue
 		}
 
-		fileMessages := runFile(file, pass.Fset)
-		messages = append(messages, fileMessages...)
+		runFile(pass, file)
 	}
 
-	return messages
+	return nil, nil
 }
 
 type errgroupVar struct {
@@ -128,9 +123,7 @@ func (s *ScopeStack) AddVar(name string, v *errgroupVar) {
 	s.Current().vars[name] = v
 }
 
-func runFile(file *ast.File, fset *token.FileSet) []Message {
-	var messages []Message
-
+func runFile(pass *analysis.Pass, file *ast.File) {
 	scopes := NewScopeStack()
 
 	var inspectNode func(node ast.Node) bool
@@ -142,14 +135,7 @@ func runFile(file *ast.File, fset *token.FileSet) []Message {
 
 		for varName, varData := range scope.vars {
 			if !varData.waitCalled {
-				messages = append(messages, Message{
-					Diagnostic:  varData.ident.Pos(),
-					FixStart:    varData.ident.Pos(),
-					FixEnd:      varData.ident.End(),
-					LineNumbers: []int{posLine(fset, varData.ident.Pos())},
-					MessageType: MessageTypeAdd,
-					Message:     fmt.Sprintf("errgroup '%s' does not have Wait called", varName),
-				})
+				pass.Reportf(varData.ident.Pos(), fmt.Sprintf("errgroup '%s' does not have Wait called", varName))
 			}
 		}
 	}
@@ -216,10 +202,4 @@ func runFile(file *ast.File, fset *token.FileSet) []Message {
 	}
 
 	ast.Inspect(file, inspectNode)
-
-	return messages
-}
-
-func posLine(fset *token.FileSet, pos token.Pos) int {
-	return fset.PositionFor(pos, false).Line
 }
