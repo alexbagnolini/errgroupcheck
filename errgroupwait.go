@@ -203,12 +203,10 @@ func runFile(file *ast.File, fset *token.FileSet) []Message {
 							// This is an errgroup.Group initialization
 							for _, lhs := range stmt.Lhs {
 								if varIdent, ok := lhs.(*ast.Ident); ok {
-									scope := scopes.Current()
-
-									scope.vars[varIdent.Name] = &errgroupVar{
+									scopes.AddVar(varIdent.Name, &errgroupVar{
 										waitCalled: false,
 										ident:      varIdent,
-									}
+									})
 								}
 							}
 						}
@@ -218,11 +216,10 @@ func runFile(file *ast.File, fset *token.FileSet) []Message {
 						if ident, ok := sel.X.(*ast.Ident); ok && sel.Sel.Name == "WithContext" && ident.Name == "errgroup" {
 							for _, lhs := range stmt.Lhs {
 								if varIdent, ok := lhs.(*ast.Ident); ok {
-									scope := scopes.Current()
-									scope.vars[varIdent.Name] = &errgroupVar{
+									scopes.AddVar(varIdent.Name, &errgroupVar{
 										waitCalled: false,
 										ident:      varIdent,
-									}
+									})
 
 									// First variable is the errgroup, second is the context
 									break
@@ -236,8 +233,7 @@ func runFile(file *ast.File, fset *token.FileSet) []Message {
 			// Check for Wait calls on errgroup variables
 			if sel, ok := stmt.Fun.(*ast.SelectorExpr); ok {
 				if ident, ok := sel.X.(*ast.Ident); ok && sel.Sel.Name == "Wait" {
-					scope := scopes.Current()
-					if errgroupVar, exists := scope.vars[ident.Name]; exists {
+					if errgroupVar := scopes.FindVar(ident.Name); errgroupVar != nil {
 						errgroupVar.waitCalled = true
 					}
 				}
