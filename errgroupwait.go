@@ -2,8 +2,10 @@ package errgroupcheck
 
 import (
 	"flag"
+	"fmt"
 	"go/ast"
 	"go/token"
+	"reflect"
 
 	"golang.org/x/tools/go/analysis"
 )
@@ -54,6 +56,7 @@ func NewAnalyzer(settings *Settings) *analysis.Analyzer {
 		Run: func(p *analysis.Pass) (any, error) {
 			return Run(p, settings), nil
 		},
+		ResultType: reflect.TypeOf([]Message{}),
 	}
 }
 
@@ -106,20 +109,123 @@ func Run(pass *analysis.Pass, settings *Settings) []Message {
 	return messages
 }
 
+type errgroupVar struct {
+	waitCalled bool
+	ident      *ast.Ident
+}
+
+type Scope struct {
+	vars map[string]*errgroupVar
+}
+
+type ScopeStack struct {
+	stack []*Scope
+}
+
+func NewScopeStack() *ScopeStack {
+	stack := &ScopeStack{stack: []*Scope{}}
+	stack.Push()
+	return stack
+}
+
+func (s *ScopeStack) Push() {
+	s.stack = append(s.stack, &Scope{vars: make(map[string]*errgroupVar)})
+}
+
+func (s *ScopeStack) Pop() *Scope {
+	scope := s.Current()
+	s.stack = s.stack[:len(s.stack)-1]
+	return scope
+}
+
+func (s *ScopeStack) Current() *Scope {
+	return s.stack[len(s.stack)-1]
+}
+
+func (s *ScopeStack) FindVar(name string) *errgroupVar {
+	for i := len(s.stack) - 1; i >= 0; i-- {
+		if v, ok := s.stack[i].vars[name]; ok {
+			return v
+		}
+	}
+	return nil
+}
+
+func (s *ScopeStack) AddVar(name string, v *errgroupVar) {
+	s.Current().vars[name] = v
+}
+
 func runFile(file *ast.File, fset *token.FileSet) []Message {
 	var messages []Message
-	var errGroupVars = map[string]bool{}
 
-	inspect := func(node ast.Node) bool {
+	scopes := NewScopeStack()
+
+	var inspectNode func(node ast.Node) bool
+	inspectScoped := func(node ast.Node) {
+		// New function scope
+		scopes.Push()
+		ast.Inspect(node, inspectNode)
+		scope := scopes.Pop()
+
+		for varName, varData := range scope.vars {
+			if !varData.waitCalled {
+				messages = append(messages, Message{
+					Diagnostic:  varData.ident.Pos(),
+					FixStart:    varData.ident.Pos(),
+					FixEnd:      varData.ident.End(),
+					LineNumbers: []int{posLine(fset, varData.ident.Pos())},
+					MessageType: MessageTypeAdd,
+					Message:     fmt.Sprintf("errgroup '%s' does not have Wait called", varName),
+				})
+			}
+		}
+	}
+
+	inspectNode = func(node ast.Node) bool {
 		switch stmt := node.(type) {
+		case *ast.FuncDecl:
+			if stmt.Body != nil {
+				inspectScoped(stmt.Body) // Handle function declaration scope
+			}
+			return false // Stop inspecting this branch, as it has been handled
+
+		case *ast.FuncLit:
+			inspectScoped(stmt.Body) // Handle function literal scope
+			return false
+
 		case *ast.AssignStmt:
 			for _, rhs := range stmt.Rhs {
-				if call, ok := rhs.(*ast.CallExpr); ok {
-					if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
-						if ident, ok := sel.X.(*ast.Ident); ok && (sel.Sel.Name == "WithContext" && ident.Name == "errgroup" || sel.Sel.Name == "Group" && ident.Name == "errgroup") {
+				switch expr := rhs.(type) {
+				case *ast.CompositeLit:
+					// Check if this is a composition of errgroup.Group
+					if sel, ok := expr.Type.(*ast.SelectorExpr); ok {
+						if ident, ok := sel.X.(*ast.Ident); ok && sel.Sel.Name == "Group" && ident.Name == "errgroup" {
+							// This is an errgroup.Group initialization
 							for _, lhs := range stmt.Lhs {
 								if varIdent, ok := lhs.(*ast.Ident); ok {
-									errGroupVars[varIdent.Name] = false
+									scope := scopes.Current()
+
+									scope.vars[varIdent.Name] = &errgroupVar{
+										waitCalled: false,
+										ident:      varIdent,
+									}
+								}
+							}
+						}
+					}
+				case *ast.CallExpr:
+					if sel, ok := expr.Fun.(*ast.SelectorExpr); ok {
+						if ident, ok := sel.X.(*ast.Ident); ok && sel.Sel.Name == "WithContext" && ident.Name == "errgroup" {
+							for _, lhs := range stmt.Lhs {
+								if varIdent, ok := lhs.(*ast.Ident); ok {
+									scope := scopes.Current()
+									scope.vars[varIdent.Name] = &errgroupVar{
+										waitCalled: false,
+										ident:      varIdent,
+									}
+
+									// First variable is the errgroup, second is the context
+									break
 								}
 							}
 						}
@@ -127,10 +233,12 @@ func runFile(file *ast.File, fset *token.FileSet) []Message {
 				}
 			}
 		case *ast.CallExpr:
+			// Check for Wait calls on errgroup variables
 			if sel, ok := stmt.Fun.(*ast.SelectorExpr); ok {
 				if ident, ok := sel.X.(*ast.Ident); ok && sel.Sel.Name == "Wait" {
-					if _, exists := errGroupVars[ident.Name]; exists {
-						errGroupVars[ident.Name] = true
+					scope := scopes.Current()
+					if errgroupVar, exists := scope.vars[ident.Name]; exists {
+						errgroupVar.waitCalled = true
 					}
 				}
 			}
@@ -138,33 +246,7 @@ func runFile(file *ast.File, fset *token.FileSet) []Message {
 		return true
 	}
 
-	ast.Inspect(file, inspect)
-
-	for varName, hasWait := range errGroupVars {
-		if !hasWait {
-			for _, decl := range file.Decls {
-				if funcDecl, ok := decl.(*ast.FuncDecl); ok {
-					if funcDecl.Body != nil {
-						for _, stmt := range funcDecl.Body.List {
-							ast.Inspect(stmt, func(n ast.Node) bool {
-								if ident, ok := n.(*ast.Ident); ok && ident.Name == varName {
-									messages = append(messages, Message{
-										Diagnostic:  ident.Pos(),
-										FixStart:    ident.Pos(),
-										FixEnd:      ident.End(),
-										LineNumbers: []int{posLine(fset, ident.Pos())},
-										MessageType: MessageTypeAdd,
-										Message:     "errgroup does not have Wait called",
-									})
-								}
-								return true
-							})
-						}
-					}
-				}
-			}
-		}
-	}
+	ast.Inspect(file, inspectNode)
 
 	return messages
 }

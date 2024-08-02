@@ -13,5 +13,5 @@ func TestRequireWait(t *testing.T) {
 		RequireWait: true,
 	})
 
-	analysistest.Run(t, testdata, analyzer, "a/require_wait")
+	analysistest.Run(t, testdata, analyzer)
 }
