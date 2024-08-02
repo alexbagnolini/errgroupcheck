@@ -1,6 +1,6 @@
 module github.com/alexbagnolini/errgroupcheck
 
-go 1.22.2
+go 1.21
 
 require golang.org/x/tools v0.23.0
 
