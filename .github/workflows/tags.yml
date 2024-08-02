@@ -1,5 +1,8 @@
 name: "Release a tag"
 
+permissions:
+  contents: write
+  
 on:
   push:
     tags:
@@ -21,4 +24,4 @@ jobs:
           version: latest
           args: release --rm-dist
         env:
-          GITHUB_TOKEN: ${{ secrets.THELPER_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.ERRGROUPCHECK_BUILD_GITHUB_TOKEN }}
